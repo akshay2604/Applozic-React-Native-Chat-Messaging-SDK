@@ -1,4 +1,4 @@
-package com.applozic.notification;
+package com.applozic;
 
 import android.util.Log;
 

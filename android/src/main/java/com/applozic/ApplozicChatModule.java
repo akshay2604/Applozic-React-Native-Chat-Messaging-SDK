@@ -1,14 +1,16 @@
 package com.applozic;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.text.TextUtils;
 import android.util.Log;
+import android.support.v4.content.LocalBroadcastManager;
 
 import com.applozic.mobicomkit.Applozic;
 import com.applozic.mobicomkit.ApplozicClient;
-import com.applozic.mobicomkit.contact.AppContactService;
 import com.applozic.mobicomkit.uiwidgets.ApplozicSetting;
 import com.applozic.mobicomkit.api.account.register.RegistrationResponse;
 import com.applozic.mobicomkit.api.account.user.MobiComUserPreference;
@@ -26,15 +28,20 @@ import com.applozic.mobicomkit.uiwidgets.conversation.activity.ConversationActiv
 import com.applozic.mobicommons.file.FileUtils;
 import com.applozic.mobicommons.json.GsonUtils;
 import com.applozic.mobicommons.people.channel.Channel;
-import com.applozic.mobicommons.people.contact.Contact;
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableMap;
 import com.applozic.mobicomkit.feed.AlResponse;
 import com.applozic.mobicomkit.uiwidgets.async.ApplozicChannelRemoveMemberTask;
+
+import com.google.firebase.messaging.RemoteMessage;
+import com.google.firebase.iid.FirebaseInstanceId;
+import com.google.firebase.messaging.FirebaseMessaging;
+
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -45,10 +52,19 @@ import java.util.Set;
 
 
 public class ApplozicChatModule extends ReactContextBaseJavaModule implements ActivityEventListener {
-
+    
+    private static final String TAG = "ApplozicChatModule";
+    
     public ApplozicChatModule(ReactApplicationContext reactContext) {
         super(reactContext);
         reactContext.addActivityEventListener(this);
+        LocalBroadcastManager localBroadcastManager = LocalBroadcastManager.getInstance(reactContext);
+
+        // Subscribe to message events
+        localBroadcastManager.registerReceiver(
+            new MessageReceiver(),
+            new IntentFilter(FcmListenerService.MESSAGE_EVENT)
+        );
     }
 
     @Override
@@ -118,6 +134,7 @@ public class ApplozicChatModule extends ReactContextBaseJavaModule implements Ac
         Intent intent = new Intent(currentActivity, ConversationActivity.class);
         currentActivity.startActivity(intent);
     }
+    
 
     @ReactMethod
     public void openChatWithUser(String userId) {
@@ -135,29 +152,6 @@ public class ApplozicChatModule extends ReactContextBaseJavaModule implements Ac
             intent.putExtra(ConversationUIService.USER_ID, userId);
             intent.putExtra(ConversationUIService.TAKE_ORDER, true);
 
-        }
-        currentActivity.startActivity(intent);
-    }
-
-    @ReactMethod
-    public void openChatWithUserName(String userId, String userName) {
-        Activity currentActivity = getCurrentActivity();
-
-        if (currentActivity == null) {
-            Log.i("open ChatWithUser  ", "Activity doesn't exist");
-            return;
-        }
-
-        Intent intent = new Intent(currentActivity, ConversationActivity.class);
-
-        if (userId != null) {
-
-            intent.putExtra(ConversationUIService.USER_ID, userId);
-            intent.putExtra(ConversationUIService.TAKE_ORDER, true);
-
-        }
-        if (userName != null && userName != "") {
-            intent.putExtra(ConversationUIService.DISPLAY_NAME, userName);
         }
         currentActivity.startActivity(intent);
     }
@@ -475,7 +469,7 @@ public class ApplozicChatModule extends ReactContextBaseJavaModule implements Ac
     public void isUserLogIn(final Callback successCallback) {
         Activity currentActivity = getCurrentActivity();
         MobiComUserPreference mobiComUserPreference = MobiComUserPreference.getInstance(currentActivity);
-        successCallback.invoke(String.valueOf(mobiComUserPreference.isLoggedIn()));
+        successCallback.invoke(mobiComUserPreference.isLoggedIn());
     }
 
     @ReactMethod
@@ -539,28 +533,6 @@ public class ApplozicChatModule extends ReactContextBaseJavaModule implements Ac
         ApplozicSetting.getInstance(currentActivity).setGalleryFilterOptions(options);
     }
 
-    @ReactMethod
-    public void addContacts(String contactJson, Callback callback) {
-        Activity currentActivity = getCurrentActivity();
-        if (currentActivity == null) {
-            return;
-        }
-        try {
-            if (!TextUtils.isEmpty(contactJson)) {
-                AppContactService appContactService = new AppContactService(currentActivity);
-                Contact[] contactList = (Contact[]) GsonUtils.getObjectFromJson(contactJson, Contact[].class);
-                for (Contact contact : contactList) {
-                    appContactService.upsert(contact);
-                }
-                callback.invoke("Success", "Contacts inserted");
-            }
-        } catch (Exception e) {
-            if (callback != null) {
-                callback.invoke("Error", e.getMessage());
-            }
-        }
-    }
-
     @Override
     public void onActivityResult(Activity activity, final int requestCode, final int resultCode, final Intent intent) {
     }
@@ -569,4 +541,18 @@ public class ApplozicChatModule extends ReactContextBaseJavaModule implements Ac
     public void onNewIntent(Intent intent) {
     }
 
+    private class MessageReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (getReactApplicationContext().hasActiveCatalystInstance()) {
+            Log.d(TAG, "Received new message");
+
+            RemoteMessage message = intent.getParcelableExtra("message");
+            Log.d(TAG, "Remote message"+message);
+            WritableMap messageMap = MessagingSerializer.parseRemoteMessage(message);
+            Log.d(TAG, "Writable Map" + messageMap);
+            Utils.sendEvent(getReactApplicationContext(), "messaging_message_received", messageMap);
+            }
+        }
+    }
 }
